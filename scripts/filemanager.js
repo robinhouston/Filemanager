@@ -623,6 +623,13 @@ $(function(){
 
 	// Provide initial values for upload form, status, etc.
 	setUploader(fileRoot);
+	if (lang == "gae") {
+		$.getJSON(fileConnector + '?mode=getuploadpath', function(response) {
+			$('#uploader').attr('action', response["Path"]);
+		});
+	} else {
+		$('#uploader').attr('action', fileConnector);
+	}
 
 	$('#uploader').attr('action', fileConnector);
 

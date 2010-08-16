@@ -16,9 +16,8 @@ import google.appengine.ext.webapp.util
 
 from py import constants
 
-# The filemanager code assumes that the paths used here correspond to url paths
-# exactly, which is not a very convenient assumption for us.
-ROOT_PATH = "/action/f"
+# Set this to the same value used for fileRoot in filemanager.config.js
+ROOT_PATH = "/filemanager/files"
 
 class FileException(Exception):
   """Any error from one of the file/folder operations."""
