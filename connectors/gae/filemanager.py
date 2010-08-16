@@ -183,7 +183,7 @@ class FileTreeHandler(webapp.RequestHandler):
     logging.info("Generating file tree for %s", path)
     folder = Folder.get_by_path(path)
     if folder:
-      self.response.out.write(template.render("../templates/filemanager/filetree.tmpl", {
+      self.response.out.write(template.render("filetree.html", {
         "listing": folder.children()
       }))
     else:
