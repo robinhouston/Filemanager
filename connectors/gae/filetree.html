@@ -1,0 +1,9 @@
+<ul class="jqueryFileTree" style="display: none;">
+  {% for dirent in listing %}
+    {% if dirent.is_folder %}
+      <li class="directory collapsed"><a href="#" rel="{{ dirent.get_path|escape }}/">{{ dirent.get_name|escape }}/</a></li>
+    {% else %}
+      <li class="file ext_{{ dirent.extension|escape }}"><a href="#" rel="{{ dirent.get_path|escape }}">{{ dirent.get_name|escape }}</a></li>
+    {% endif %}
+  {% endfor %}
+</ul>
