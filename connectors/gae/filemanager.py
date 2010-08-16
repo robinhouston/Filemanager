@@ -7,6 +7,7 @@ import re
 import urllib
 
 from django.utils import simplejson as json
+from google.appengine.api import images
 from google.appengine.ext import blobstore
 from google.appengine.ext import db
 from google.appengine.ext import webapp
@@ -16,8 +17,9 @@ import google.appengine.ext.webapp.util
 
 from py import constants
 
-# Set this to the same value used for fileRoot in filemanager.config.js
-ROOT_PATH = "/filemanager/files"
+# The filemanager code assumes that the paths used here correspond to url paths
+# exactly, which is not a very convenient assumption for us.
+ROOT_PATH = "/action/f"
 
 class FileException(Exception):
   """Any error from one of the file/folder operations."""
@@ -43,11 +45,8 @@ class Folder(db.Model):
       return ds[0]
     if path == ROOT_PATH:
       # If the root folder doesn't exist, create it
-      path_components = re.findall(r"(/?[^/]+)", path) or [""]
-      for p in [ "".join(path_components[:i]) or "/" for i in range(len(path_components)) ]:
-        d = cls(path=path)
-        d.put()
-      
+      d = cls(path=path)
+      d.put()
       return d
     
     return None
@@ -169,6 +168,11 @@ class File(db.Model):
     f.filename = new_name
     f.put()
   
+  def delete(self):
+    if self.content is not None:
+      self.content.delete()
+    db.delete(self)
+  
   def write_to(self, out):
     br = blobstore.BlobReader(self.content.key())
     while True:
@@ -183,7 +187,7 @@ class FileTreeHandler(webapp.RequestHandler):
     logging.info("Generating file tree for %s", path)
     folder = Folder.get_by_path(path)
     if folder:
-      self.response.out.write(template.render("filetree.html", {
+      self.response.out.write(template.render("../templates/filemanager/filetree.tmpl", {
         "listing": folder.children()
       }))
     else:
@@ -231,8 +235,16 @@ class FileManagerHandler(blobstore_handlers.BlobstoreUploadHandler):
     if folder is None:
       self.redirect(self.request.path + "?" + urllib.urlencode({
         "mode": "added",
-        "error": "Folder does not exist",
+        "error": "Folder does not exist: %s" % (path,),
       }))
+      return
+    
+    if self.get_dirent_by_path(path + "/" + uploaded_file.filename) is not None:
+      self.redirect(self.request.path + "?" + urllib.urlencode({
+        "mode": "added",
+        "error": "File already exists",
+      }))
+      return
     
     dirent = File(folder=folder, content=uploaded_file, filename=uploaded_file.filename)
     # xxxx - width/height for images
@@ -252,8 +264,9 @@ class FileManagerHandler(blobstore_handlers.BlobstoreUploadHandler):
         "Code": -1,
       }
     dirent = db.get(db.Key(key_str))
+    parent_path = dirent.folder.get_path()
     return {
-      "Path": dirent.get_path(),
+      "Path": parent_path if parent_path.endswith('/') else parent_path + '/',
       "Name": dirent.get_name(),
       "Error": "", "Code": 0,
     }
@@ -294,7 +307,11 @@ class FileManagerHandler(blobstore_handlers.BlobstoreUploadHandler):
       if extension is None:
         extension = "txt"
       elif extension in self.extensions_with_icons:
-        icon = "/filemanager/images/fileicons/default.png"
+        icon = "/filemanager/images/fileicons/%s.png" % (extension,)
+      
+      # Use a thumbnail for images
+      if dirent.content and dirent.content.content_type.startswith("image/"):
+        icon = re.sub(r"^/action/f/", "/action/t/", dirent.get_path())
       
       r.update({
         "File Type": extension,
@@ -312,9 +329,9 @@ class FileManagerHandler(blobstore_handlers.BlobstoreUploadHandler):
     path, show_thumbs = [ self.request.get(x) for x in ["path", "showThumbs"] ]
     d = self.get_dirent_by_path(path)
     if not d:
-      raise FileException("Folder %s not found" % (path))
+      raise FileException("Folder %s not found" % (path,))
     if not d.is_folder:
-      d = d.folder
+      raise FileException("%s is not a folder" % (path,))
     
     return dict(
       (dirent.get_path(), self.getinfo(dirent))
@@ -330,9 +347,15 @@ class FileManagerHandler(blobstore_handlers.BlobstoreUploadHandler):
       new_path = path + "/" + name
     parent_folder = Folder.get_by_path(path)
     if parent_folder is None:
-      raise FileException("")
+      raise FileException("Folder %s does not exist" % (path,))
+    if self.get_dirent_by_path(new_path) is not None:
+      raise EAlready("Already exists: %s" % (new_path,))
     Folder(path = new_path).put()
-    return {"Parent": path, "Name": name, "Error": "No error", "Code": 0}
+    return {
+      "Parent": path if path.endswith("/") else path + "/",
+      "Name": name,
+      "Error": "No error", "Code": 0
+    }
   
   def rename(self):
     old_path, new_name = [ self.request.get(x) for x in ["old", "new"] ]
@@ -375,21 +398,45 @@ class FileManagerHandler(blobstore_handlers.BlobstoreUploadHandler):
     self.response.headers["Content-disposition"] = "attachment; filename=" + dirent.filename
     dirent.write_to(self.response.out)
 
-class DownloadHandler(webapp.RequestHandler):
+class FileHandler(webapp.RequestHandler):
   def get(self, path):
+    path = urllib.unquote(path)
     f = File.get_by_path(path)
     if f is None:
+      logging.error("Path %s not found", path)
       self.error(404)
       return
     
-    self.response.headers["Content-type"] = dirent.content.content_type
+    self.response.headers["Content-type"] = f.content.content_type
     f.write_to(self.response.out)
+
+class ThumbnailHandler(webapp.RequestHandler):
+  def get(self, path_suffix):
+    path = "/action/f/" + urllib.unquote(path_suffix)
+    f = File.get_by_path(path)
+    if f is None:
+      logging.error("Path %s not found", path)
+      self.error(404)
+      return
+    if f.is_folder:
+      logging.error("Can't create thumbnail of a folder")
+      self.error(404)
+      return
+    
+    img = images.Image(blob_key=str(f.content.key()))
+    img.resize(width=64, height=64)
+    img.im_feeling_lucky()
+    thumbnail = img.execute_transforms(output_encoding=images.JPEG)
+
+    self.response.headers['Content-Type'] = 'image/jpeg'
+    self.response.out.write(thumbnail)
 
 def main():
   handlers = [
     ('/filemanager/scripts/jquery.filetree/connectors/jqueryFileTree.gae', FileTreeHandler),
     ('/filemanager/connectors/gae/filemanager.gae', FileManagerHandler),
-    ('/action/f(/.+)', DownloadHandler)
+    ('(/action/f/.+)', FileHandler),
+    ('/action/t/(.+)', ThumbnailHandler),
   ]
 
   webapp.util.run_wsgi_app(

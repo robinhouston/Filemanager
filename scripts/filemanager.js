@@ -310,7 +310,7 @@ var addNode = function(path, name){
 	thisNode.click().click();
 
 	getFolderInfo(path);
-
+	
 	$.prompt(lg.successful_added_file);
 }
 
@@ -638,10 +638,21 @@ $(function(){
 		success: function(result){
 			eval('var data = ' + $('#uploadresponse').find('textarea').text());
 
-			if(data['Code'] == 0){
-				addNode(data['Path'], data['Name']);
+			if (lang == "gae") {
+				$.getJSON(fileConnector + '?mode=getuploadpath', function(response) {
+					$('#uploader').attr('action', response["Path"]);
+					if(data['Code'] == 0){
+						addNode(data['Path'], data['Name']);
+					} else {
+						$.prompt(data['Error']);
+					}
+				});
 			} else {
-				$.prompt(data['Error']);
+				if(data['Code'] == 0){
+					addNode(data['Path'], data['Name']);
+				} else {
+					$.prompt(data['Error']);
+				}
 			}
 		}
 	});

@@ -3,7 +3,7 @@
     {% if dirent.is_folder %}
       <li class="directory collapsed"><a href="#" rel="{{ dirent.get_path|escape }}/">{{ dirent.get_name|escape }}/</a></li>
     {% else %}
-      <li class="file ext_{{ dirent.extension|escape }}"><a href="#" rel="{{ dirent.get_path|escape }}">{{ dirent.get_name|escape }}</a></li>
+      <li class="file ext_{{ dirent.get_extension|escape }}"><a href="#" rel="{{ dirent.get_path|escape }}">{{ dirent.get_name|escape }}</a></li>
     {% endif %}
   {% endfor %}
 </ul>
